@@ -1,0 +1,11 @@
+[package]
+name = "steganotorchy"
+version = "0.1.0"
+edition = "2021"
+default-run = "steganotorchy"
+
+[dependencies]
+# NOTE "color" is a default feature.  Build `clap` without "color".
+clap = { version = "4.5.*", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "derive"] }
+anyhow = "1.0.*"
+safetensors = "0.4.*"
