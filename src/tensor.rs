@@ -342,7 +342,7 @@ impl io::Write for OwnedSafeTensors {
 pub struct ModelInfo {
     capacity: usize,
     bits_per_byte: usize,
-    length: u64,
+    length: u32,
     truncated: Vec<u8>,
 }
 
@@ -350,10 +350,10 @@ impl ModelInfo {
     pub fn from_owned_safe_tensors(
         owned_safe_tensors: &mut OwnedSafeTensors,
     ) -> anyhow::Result<Self> {
-        let mut header = [0; 8];
+        let mut header = [0; 4];
         owned_safe_tensors.read_exact(&mut header)?;
 
-        let length = u64::from_be_bytes(header);
+        let length = u32::from_be_bytes(header);
 
         let mut truncated = vec![0; std::cmp::min(length as usize, 21)];
         owned_safe_tensors.read_exact(&mut truncated)?;
@@ -464,10 +464,10 @@ impl Message {
     pub fn from_owned_safe_tensors(
         owned_safe_tensors: &mut OwnedSafeTensors,
     ) -> anyhow::Result<Self> {
-        let mut header = [0; 8];
+        let mut header = [0; 4];
         owned_safe_tensors.read_exact(&mut header)?;
 
-        let length = u64::from_be_bytes(header);
+        let length = u32::from_be_bytes(header);
 
         let mut content = vec![0; length as usize];
         owned_safe_tensors.read_exact(&mut content)?;
@@ -483,7 +483,7 @@ impl Message {
         let bits_per_byte = owned_safe_tensors.bits_per_byte;
 
         let params_for_header =
-            (8 * std::mem::size_of::<u64>()).div_ceil(bits_per_byte);
+            (8 * std::mem::size_of::<u32>()).div_ceil(bits_per_byte);
         let params_for_content =
             (8 * self.content.len()).div_ceil(bits_per_byte);
         let params_needed = params_for_header + params_for_content;
@@ -498,7 +498,7 @@ impl Message {
             params_available
         );
 
-        let header = self.content.len().to_be_bytes();
+        let header = u32::try_from(self.content.len())?.to_be_bytes();
 
         owned_safe_tensors.write_all(&header)?;
         owned_safe_tensors.write_all(&self.content)?;
