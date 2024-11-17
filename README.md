@@ -7,6 +7,8 @@ It requires that the model be saved in the [safetensors](https://github.com/hugg
 
 ## Basic idea
 
+_See this blog post for more details: [Hiding a message in my PyTorch weights](https://blog.gabornyeki.com/2024-11-hiding-a-message-in-my-pytorch-weights/)._
+
 The 32-bit floating-point representation of `1.0` in binary is
 ```
 00111111100000000000000000000000
