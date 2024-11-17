@@ -70,3 +70,8 @@ echo 'export PATH=$HOME/.cargo/bin:$PATH' >> $HOME/.bashrc  # If using bash.
 echo 'export PATH=$HOME/.cargo/bin:$PATH' >> $HOME/.zshrc   # If using zsh.
 ```
 
+## License
+
+Steganotorchy is released under the GNU General Public License (GPL) version 3.
+See the file [LICENSE](./LICENSE) for more information.
+
