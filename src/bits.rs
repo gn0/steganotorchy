@@ -125,6 +125,103 @@ impl Iterator for BitIter<'_> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub struct Ternary {
+    data: Vec<bool>,
+}
+
+impl Ternary {
+    pub fn bits(&self) -> &[bool] {
+        &self.data
+    }
+}
+
+impl TryFrom<Vec<bool>> for Ternary {
+    type Error = anyhow::Error;
+
+    fn try_from(data: Vec<bool>) -> anyhow::Result<Ternary> {
+        anyhow::ensure!(data.len() % 2 == 0);
+        anyhow::ensure!(data.len() >= 2);
+        anyhow::ensure!(data[data.len() - 1] == true);
+        anyhow::ensure!(data[data.len() - 2] == true);
+
+        Ok(Ternary { data })
+    }
+}
+
+impl From<usize> for Ternary {
+    fn from(number: usize) -> Self {
+        let n_trits =
+            usize::try_from(number.checked_ilog(3).unwrap_or(0))
+                .expect("usize should be at least 32 bits wide.");
+
+        let mut ternary = Vec::with_capacity(n_trits + 1);
+
+        ternary.push(vec![true, true]); // End-of-record marker.
+
+        let mut remainder = number;
+
+        while remainder > 0 {
+            match remainder % 3 {
+                0 => ternary.push(vec![false, false]),
+                1 => ternary.push(vec![false, true]),
+                2 => ternary.push(vec![true, false]),
+
+                // The exhaustiveness checker is getting confused here
+                // so we help it out.
+                3.. => unreachable!(),
+            }
+
+            remainder /= 3;
+        }
+
+        ternary.reverse();
+
+        Ternary {
+            data: ternary.into_iter().flatten().collect(),
+        }
+    }
+}
+
+impl TryFrom<&Ternary> for usize {
+    type Error = anyhow::Error;
+
+    fn try_from(ternary: &Ternary) -> anyhow::Result<usize> {
+        anyhow::ensure!(ternary.data.len() % 2 == 0);
+
+        let mut number = 0;
+
+        let a_iter = ternary
+            .data
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| index % 2 == 0)
+            .map(|(_, x)| x);
+        let b_iter = ternary
+            .data
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| index % 2 == 1)
+            .map(|(_, x)| x);
+
+        for (a, b) in a_iter.zip(b_iter) {
+            let trit = match (a, b) {
+                (false, false) => 0,
+                (false, true) => 1,
+                (true, false) => 2,
+                (true, true) => break, // End-of-record marker.
+            };
+
+            anyhow::ensure!(number <= (usize::MAX - trit) / 3);
+
+            number *= 3;
+            number += trit;
+        }
+
+        Ok(number)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,5 +276,43 @@ mod tests {
                 false, false, false, false, false, false, false, true
             ]
         );
+    }
+
+    #[test]
+    fn ternary_conversion_roundtrip_preserves_value() {
+        for number in 0..1024 {
+            assert_eq!(
+                usize::try_from(&Ternary::from(number)).unwrap(),
+                number
+            );
+        }
+    }
+
+    #[test]
+    fn ternary_from_is_correct() {
+        for (number, ternary) in [
+            (0, vec![true, true]),
+            (1, vec![false, true, true, true]),
+            (2, vec![true, false, true, true]),
+            (3, vec![false, true, false, false, true, true]),
+            (4, vec![false, true, false, true, true, true]),
+            (5, vec![false, true, true, false, true, true]),
+            (6, vec![true, false, false, false, true, true]),
+        ] {
+            assert_eq!(Ternary::from(number).data, ternary);
+        }
+    }
+
+    #[test]
+    fn ternary_catches_overflow() {
+        let mut ternary_too_large: Ternary = usize::into(usize::MAX);
+
+        assert!(usize::try_from(&ternary_too_large).is_ok());
+
+        // Add 1.
+        let n_ternary_too_large = ternary_too_large.data.len();
+        ternary_too_large.data[n_ternary_too_large - 3] = true;
+
+        assert!(usize::try_from(&ternary_too_large).is_err());
     }
 }

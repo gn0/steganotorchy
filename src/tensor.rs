@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use anyhow::anyhow;
 use safetensors::tensor::Dtype;
 use safetensors::{SafeTensors, View};
 use std::borrow::Cow;
@@ -9,7 +10,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::str::FromStr;
 
-use crate::bits::{BitIter, BitManip, FromBits};
+use crate::bits::{BitIter, BitManip, FromBits, Ternary};
 
 pub struct OwnedTensor {
     dtype: Dtype,
@@ -347,7 +348,7 @@ impl io::Write for OwnedSafeTensors {
 pub struct ModelInfo {
     capacity: usize,
     bits_per_byte: usize,
-    length: u32,
+    length: usize,
     truncated: Vec<u8>,
 }
 
@@ -355,12 +356,9 @@ impl ModelInfo {
     pub fn from_owned_safe_tensors(
         owned_safe_tensors: &mut OwnedSafeTensors,
     ) -> anyhow::Result<Self> {
-        let mut header = [0; 4];
-        owned_safe_tensors.read_exact(&mut header)?;
+        let length = Message::read_message_length(owned_safe_tensors)?;
 
-        let length = u32::from_be_bytes(header);
-
-        let mut truncated = vec![0; std::cmp::min(length as usize, 21)];
+        let mut truncated = vec![0; std::cmp::min(length, 21)];
         owned_safe_tensors.seek_next_whole_byte();
         owned_safe_tensors.read_exact(&mut truncated)?;
 
@@ -448,6 +446,52 @@ impl Message {
         self.content.len()
     }
 
+    fn read_message_length(
+        owned_safe_tensors: &mut OwnedSafeTensors,
+    ) -> anyhow::Result<usize> {
+        let mut header_bits = Vec::new();
+
+        loop {
+            if header_bits.len() > 84 {
+                return Err(anyhow!(
+                    "Header is too long, implies a message length of \
+                     more than 31 exbibytes.",
+                ));
+            }
+
+            let Some(a) = owned_safe_tensors.read_bit() else {
+                return Err(anyhow!(
+                    "Cannot read bit {} from header.",
+                    header_bits.len()
+                ));
+            };
+            let Some(b) = owned_safe_tensors.read_bit() else {
+                return Err(anyhow!(
+                    "Cannot read bit {} from header.",
+                    header_bits.len() + 1
+                ));
+            };
+
+            header_bits.push(a);
+            header_bits.push(b);
+
+            if a && b {
+                // End-of-record marker.
+                //
+                break;
+            }
+        }
+
+        let Ok(header_ternary) = Ternary::try_from(header_bits) else {
+            return Err(anyhow!(
+                "Header is not a valid ternary encoding of a message \
+                 length."
+            ));
+        };
+
+        usize::try_from(&header_ternary)
+    }
+
     /// Extract a message from the bits of `owned_safe_tensors`.
     ///
     /// The message is embedded in two sections:
@@ -470,12 +514,9 @@ impl Message {
     pub fn from_owned_safe_tensors(
         owned_safe_tensors: &mut OwnedSafeTensors,
     ) -> anyhow::Result<Self> {
-        let mut header = [0; 4];
-        owned_safe_tensors.read_exact(&mut header)?;
+        let length = Self::read_message_length(owned_safe_tensors)?;
 
-        let length = u32::from_be_bytes(header);
-
-        let mut content = vec![0; length as usize];
+        let mut content = vec![0; length];
         owned_safe_tensors.seek_next_whole_byte();
         owned_safe_tensors.read_exact(&mut content)?;
 
@@ -489,8 +530,10 @@ impl Message {
     ) -> anyhow::Result<()> {
         let bits_per_byte = owned_safe_tensors.bits_per_byte;
 
+        let header_ternary = Ternary::from(self.content.len());
+
         let params_for_header =
-            (8 * std::mem::size_of::<u32>()).div_ceil(bits_per_byte);
+            header_ternary.bits().len().div_ceil(bits_per_byte);
         let params_for_content =
             (8 * self.content.len()).div_ceil(bits_per_byte);
         let params_needed = params_for_header + params_for_content;
@@ -505,9 +548,14 @@ impl Message {
             params_available
         );
 
-        let header = u32::try_from(self.content.len())?.to_be_bytes();
+        for (index, &bit) in header_ternary.bits().iter().enumerate() {
+            if owned_safe_tensors.write_bit(bit).is_none() {
+                return Err(anyhow!(
+                    "Cannot embed bit {index} of the header."
+                ));
+            }
+        }
 
-        owned_safe_tensors.write_all(&header)?;
         owned_safe_tensors.seek_next_whole_byte();
         owned_safe_tensors.write_all(&self.content)?;
 
