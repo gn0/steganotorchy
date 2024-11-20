@@ -155,10 +155,9 @@ impl OwnedSafeTensors {
     }
 
     pub fn read_bit(&mut self) -> Option<bool> {
-        while self.next_pos.is_some() {
-            let &(tensor_pos, element_pos, bit_pos) =
-                self.next_pos.as_ref().unwrap();
-
+        while let Some(&(tensor_pos, element_pos, bit_pos)) =
+            self.next_pos.as_ref()
+        {
             let Some((_, owned_tensor, dtype_size)) =
                 self.tensors.get(tensor_pos)
             else {
