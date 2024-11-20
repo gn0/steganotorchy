@@ -139,7 +139,8 @@ impl OwnedSafeTensors {
     ///
     /// Leaves the position unchanged otherwise.
     pub fn bump_pos(&mut self) {
-        let &(tensor_pos, element_pos, bit_pos) = self.next_pos
+        let &(tensor_pos, element_pos, bit_pos) = self
+            .next_pos
             .as_ref()
             .expect("Next position should always be set.");
 
@@ -149,7 +150,9 @@ impl OwnedSafeTensors {
             // byte.
             //
             self.next_pos = Some((
-                tensor_pos, element_pos + 1, 8 - self.bits_per_byte
+                tensor_pos,
+                element_pos + 1,
+                8 - self.bits_per_byte,
             ));
         }
     }
@@ -164,7 +167,7 @@ impl OwnedSafeTensors {
                 // Next position points to invalid owned tensor.
                 //
                 self.next_pos = None;
-                break
+                break;
             };
 
             let Some(dtype_size) = dtype_size else {
@@ -173,7 +176,7 @@ impl OwnedSafeTensors {
                 //
                 self.next_pos =
                     Some((tensor_pos + 1, 0, 8 - self.bits_per_byte));
-                continue
+                continue;
             };
 
             let byte_pos = (element_pos + 1) * *dtype_size - 1;
@@ -185,7 +188,7 @@ impl OwnedSafeTensors {
                 self.next_pos =
                     Some((tensor_pos + 1, 0, 8 - self.bits_per_byte));
 
-                continue
+                continue;
             };
 
             let bit = byte
@@ -224,34 +227,27 @@ impl OwnedSafeTensors {
                 // Next position points to invalid owned tensor.
                 //
                 self.next_pos = None;
-                break
+                break;
             };
 
             let Some(dtype_size) = dtype_size else {
                 // Next position points to unsuitable owned tensor.
                 // We advance to the next owned tensor.
                 //
-                self.next_pos = Some((
-                    tensor_pos + 1,
-                    0,
-                    8 - self.bits_per_byte,
-                ));
-                continue
+                self.next_pos =
+                    Some((tensor_pos + 1, 0, 8 - self.bits_per_byte));
+                continue;
             };
 
             let byte_pos = (element_pos + 1) * *dtype_size - 1;
 
-            let Some(byte) = owned_tensor.data.get_mut(byte_pos)
-            else {
+            let Some(byte) = owned_tensor.data.get_mut(byte_pos) else {
                 // Next position points to invalid byte.  We advance
                 // to the next owned tensor.
                 //
-                self.next_pos = Some((
-                    tensor_pos + 1,
-                    0,
-                    8 - self.bits_per_byte,
-                ));
-                continue
+                self.next_pos =
+                    Some((tensor_pos + 1, 0, 8 - self.bits_per_byte));
+                continue;
             };
 
             let modified_byte = byte.embed_bit(bit, bit_pos)?;
@@ -287,10 +283,7 @@ impl io::Read for OwnedSafeTensors {
         let mut bits = Vec::with_capacity(8);
 
         while length < buffer.len() {
-            let Some(bit) = self.read_bit()
-            else {
-                break
-            };
+            let Some(bit) = self.read_bit() else { break };
 
             bits.push(bit);
 
