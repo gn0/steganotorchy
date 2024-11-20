@@ -153,21 +153,11 @@ impl OwnedSafeTensors {
             ));
         }
     }
-}
 
-impl io::Read for OwnedSafeTensors {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        let mut length = 0;
-        let mut bits = Vec::with_capacity(8);
-
-        while length < buffer.len() {
-            let Some(&(tensor_pos, element_pos, bit_pos)) =
-                self.next_pos.as_ref()
-            else {
-                // No next position.
-                //
-                break;
-            };
+    pub fn read_bit(&mut self) -> Option<bool> {
+        while self.next_pos.is_some() {
+            let &(tensor_pos, element_pos, bit_pos) =
+                self.next_pos.as_ref().unwrap();
 
             let Some((_, owned_tensor, dtype_size)) =
                 self.tensors.get(tensor_pos)
@@ -175,7 +165,7 @@ impl io::Read for OwnedSafeTensors {
                 // Next position points to invalid owned tensor.
                 //
                 self.next_pos = None;
-                break;
+                break
             };
 
             let Some(dtype_size) = dtype_size else {
@@ -184,7 +174,7 @@ impl io::Read for OwnedSafeTensors {
                 //
                 self.next_pos =
                     Some((tensor_pos + 1, 0, 8 - self.bits_per_byte));
-                continue;
+                continue
             };
 
             let byte_pos = (element_pos + 1) * *dtype_size - 1;
@@ -196,22 +186,12 @@ impl io::Read for OwnedSafeTensors {
                 self.next_pos =
                     Some((tensor_pos + 1, 0, 8 - self.bits_per_byte));
 
-                continue;
+                continue
             };
 
             let bit = byte
                 .extract_bit(bit_pos)
                 .expect("Bit position should be valid.");
-
-            bits.push(bit);
-
-            if bits.len() == 8 {
-                buffer[length] = u8::from_bits(&bits).unwrap();
-
-                length += 1;
-
-                bits.clear();
-            }
 
             if bit_pos < 7 {
                 // We advance to the next bit.
@@ -227,6 +207,34 @@ impl io::Read for OwnedSafeTensors {
                     element_pos + 1,
                     8 - self.bits_per_byte,
                 ));
+            }
+
+            return Some(bit);
+        }
+
+        None
+    }
+}
+
+impl io::Read for OwnedSafeTensors {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let mut length = 0;
+        let mut bits = Vec::with_capacity(8);
+
+        while length < buffer.len() {
+            let Some(bit) = self.read_bit()
+            else {
+                break
+            };
+
+            bits.push(bit);
+
+            if bits.len() == 8 {
+                buffer[length] = u8::from_bits(&bits).unwrap();
+
+                length += 1;
+
+                bits.clear();
             }
         }
 
