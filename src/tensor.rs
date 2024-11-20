@@ -133,23 +133,26 @@ impl OwnedSafeTensors {
     pub fn reset_pos(&mut self) {
         self.next_pos = Some((0, 0, 8 - self.bits_per_byte));
     }
-}
 
-macro_rules! bump_to_full_byte {
-    ($next_pos:expr, $bits_per_byte:expr) => {
-        let &(tensor_pos, element_pos, bit_pos) = $next_pos
+    /// Sets the position to the beginning of the next byte if the
+    /// current position is in the middle of a byte.
+    ///
+    /// Leaves the position unchanged otherwise.
+    pub fn bump_pos(&mut self) {
+        let &(tensor_pos, element_pos, bit_pos) = self.next_pos
             .as_ref()
             .expect("Next position should always be set.");
 
-        if bit_pos > 8 - $bits_per_byte {
+        if bit_pos > 8 - self.bits_per_byte {
             // The contents that were read from or written into `buffer`
             // did not exhaust the last byte.  We advance to the next
             // byte.
             //
-            $next_pos =
-                Some((tensor_pos, element_pos + 1, 8 - $bits_per_byte));
+            self.next_pos = Some((
+                tensor_pos, element_pos + 1, 8 - self.bits_per_byte
+            ));
         }
-    };
+    }
 }
 
 impl io::Read for OwnedSafeTensors {
@@ -236,8 +239,6 @@ impl io::Read for OwnedSafeTensors {
                 ),
             ))
         } else {
-            bump_to_full_byte!(self.next_pos, self.bits_per_byte);
-
             Ok(length)
         }
     }
@@ -328,11 +329,7 @@ impl io::Write for OwnedSafeTensors {
 
         match error {
             Some(err) => Err(io::Error::from(err)),
-            None => {
-                bump_to_full_byte!(self.next_pos, self.bits_per_byte);
-
-                Ok(buffer.len())
-            }
+            None => Ok(buffer.len()),
         }
     }
 
@@ -358,6 +355,7 @@ impl ModelInfo {
         let length = u32::from_be_bytes(header);
 
         let mut truncated = vec![0; std::cmp::min(length as usize, 21)];
+        owned_safe_tensors.bump_pos();
         owned_safe_tensors.read_exact(&mut truncated)?;
 
         Ok(Self {
@@ -472,6 +470,7 @@ impl Message {
         let length = u32::from_be_bytes(header);
 
         let mut content = vec![0; length as usize];
+        owned_safe_tensors.bump_pos();
         owned_safe_tensors.read_exact(&mut content)?;
 
         Ok(Self::new(&content))
@@ -503,6 +502,7 @@ impl Message {
         let header = u32::try_from(self.content.len())?.to_be_bytes();
 
         owned_safe_tensors.write_all(&header)?;
+        owned_safe_tensors.bump_pos();
         owned_safe_tensors.write_all(&self.content)?;
 
         Ok(())
@@ -693,10 +693,13 @@ mod tests {
 
     #[test]
     #[rustfmt::skip]
-    fn owned_safe_tensors_write_inserts_padding() {
+    fn owned_safe_tensors_write_with_bump_pos_inserts_padding() {
         let mut input = make_owned_safe_tensors(5);
 
         assert!(input.write_all(&[255]).is_ok());
+
+        input.bump_pos();
+
         assert!(input.write_all(&[255]).is_ok());
 
         assert_eq!(
@@ -730,18 +733,24 @@ mod tests {
     }
 
     #[test]
-    fn owned_safe_tensors_read_expects_padding() {
+    fn owned_safe_tensors_read_works_with_padding() {
         for bits_per_byte in 3..=7 {
             let mut input = make_owned_safe_tensors(bits_per_byte);
             let mut buffer_1 = [0; 1];
             let mut buffer_2 = [0; 1];
 
             assert!(input.write_all(&[255]).is_ok());
+
+            input.bump_pos();
+
             assert!(input.write_all(&[255]).is_ok());
 
             input.reset_pos();
 
             assert!(input.read_exact(&mut buffer_1).is_ok());
+
+            input.bump_pos();
+
             assert!(input.read_exact(&mut buffer_2).is_ok());
 
             assert_eq!(buffer_1, [255]);
