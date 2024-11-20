@@ -138,11 +138,12 @@ impl OwnedSafeTensors {
     /// current position is in the middle of a byte.
     ///
     /// Leaves the position unchanged otherwise.
-    pub fn bump_pos(&mut self) {
-        let &(tensor_pos, element_pos, bit_pos) = self
-            .next_pos
-            .as_ref()
-            .expect("Next position should always be set.");
+    pub fn seek_next_whole_byte(&mut self) {
+        let Some(&(tensor_pos, element_pos, bit_pos)) =
+            self.next_pos.as_ref()
+        else {
+            return;
+        };
 
         if bit_pos > 8 - self.bits_per_byte {
             // The contents that were read from or written into `buffer`
@@ -157,7 +158,31 @@ impl OwnedSafeTensors {
         }
     }
 
-    pub fn read_bit(&mut self) -> Option<bool> {
+    fn advance_next_pos(&mut self) {
+        let Some(&(tensor_pos, element_pos, bit_pos)) =
+            self.next_pos.as_ref()
+        else {
+            return;
+        };
+
+        if bit_pos < 7 {
+            // We advance to the next bit.
+            //
+            self.next_pos =
+                Some((tensor_pos, element_pos, bit_pos + 1));
+        } else {
+            // Current byte is now exhausted.  We advance to the
+            // next byte.
+            //
+            self.next_pos = Some((
+                tensor_pos,
+                element_pos + 1,
+                8 - self.bits_per_byte,
+            ));
+        }
+    }
+
+    fn seek_next_valid_pos(&mut self) {
         while let Some(&(tensor_pos, element_pos, bit_pos)) =
             self.next_pos.as_ref()
         {
@@ -181,99 +206,86 @@ impl OwnedSafeTensors {
 
             let byte_pos = (element_pos + 1) * *dtype_size - 1;
 
-            let Some(byte) = owned_tensor.data.get(byte_pos) else {
+            if byte_pos >= owned_tensor.data.len() {
                 // Next position points to invalid byte.  We advance to
                 // the next owned tensor.
                 //
                 self.next_pos =
                     Some((tensor_pos + 1, 0, 8 - self.bits_per_byte));
-
                 continue;
-            };
-
-            let bit = byte
-                .extract_bit(bit_pos)
-                .expect("Bit position should be valid.");
-
-            if bit_pos < 7 {
-                // We advance to the next bit.
-                //
-                self.next_pos =
-                    Some((tensor_pos, element_pos, bit_pos + 1));
-            } else {
-                // Current byte is now exhausted.  We advance to the
-                // next byte.
-                //
-                self.next_pos = Some((
-                    tensor_pos,
-                    element_pos + 1,
-                    8 - self.bits_per_byte,
-                ));
             }
 
-            return Some(bit);
-        }
+            self.next_pos = Some((tensor_pos, element_pos, bit_pos));
 
-        None
+            break;
+        }
+    }
+
+    fn get_next_byte(&self) -> Option<u8> {
+        let (tensor_pos, element_pos, _) = self.next_pos?;
+
+        let (_, owned_tensor, dtype_size) = self
+            .tensors
+            .get(tensor_pos)
+            .expect("Position should point to valid tensor.");
+        let dtype_size = dtype_size
+            .expect("Position should point to suitable tensor.");
+        let byte_pos = (element_pos + 1) * dtype_size - 1;
+
+        let byte = owned_tensor
+            .data
+            .get(byte_pos)
+            .expect("Position should point to valid byte.");
+
+        Some(*byte)
+    }
+
+    fn get_next_byte_mut(&mut self) -> Option<&mut u8> {
+        let (tensor_pos, element_pos, _) = self.next_pos?;
+
+        let (_, owned_tensor, dtype_size) = self
+            .tensors
+            .get_mut(tensor_pos)
+            .expect("Position should point to valid tensor.");
+        let dtype_size = dtype_size
+            .expect("Position should point to suitable tensor.");
+        let byte_pos = (element_pos + 1) * dtype_size - 1;
+
+        let byte: &mut u8 = owned_tensor
+            .data
+            .get_mut(byte_pos)
+            .expect("Position should point to valid byte.");
+
+        Some(byte)
+    }
+
+    pub fn read_bit(&mut self) -> Option<bool> {
+        self.seek_next_valid_pos();
+
+        let &(_, _, bit_pos) = self.next_pos.as_ref()?;
+        let byte = self.get_next_byte()?;
+
+        let bit = byte
+            .extract_bit(bit_pos)
+            .expect("Bit position should be valid.");
+
+        self.advance_next_pos();
+
+        Some(bit)
     }
 
     pub fn write_bit(&mut self, bit: bool) -> Option<()> {
-        while let Some(&(tensor_pos, element_pos, bit_pos)) =
-            self.next_pos.as_ref()
-        {
-            let Some((_, owned_tensor, dtype_size)) =
-                self.tensors.get_mut(tensor_pos)
-            else {
-                // Next position points to invalid owned tensor.
-                //
-                self.next_pos = None;
-                break;
-            };
+        self.seek_next_valid_pos();
 
-            let Some(dtype_size) = dtype_size else {
-                // Next position points to unsuitable owned tensor.
-                // We advance to the next owned tensor.
-                //
-                self.next_pos =
-                    Some((tensor_pos + 1, 0, 8 - self.bits_per_byte));
-                continue;
-            };
+        let &(_, _, bit_pos) = self.next_pos.as_ref()?;
+        let byte = self.get_next_byte_mut()?;
+        let modified_byte = byte.embed_bit(bit, bit_pos)?;
 
-            let byte_pos = (element_pos + 1) * *dtype_size - 1;
+        *byte = modified_byte;
 
-            let Some(byte) = owned_tensor.data.get_mut(byte_pos) else {
-                // Next position points to invalid byte.  We advance
-                // to the next owned tensor.
-                //
-                self.next_pos =
-                    Some((tensor_pos + 1, 0, 8 - self.bits_per_byte));
-                continue;
-            };
+        self.advance_next_pos();
 
-            let modified_byte = byte.embed_bit(bit, bit_pos)?;
-
-            *byte = modified_byte;
-
-            if bit_pos < 7 {
-                // We advance to the next bit.
-                //
-                self.next_pos =
-                    Some((tensor_pos, element_pos, bit_pos + 1));
-            } else {
-                // Current byte is now exhausted.  We advance to the
-                // next byte.
-                //
-                self.next_pos = Some((
-                    tensor_pos,
-                    element_pos + 1,
-                    8 - self.bits_per_byte,
-                ));
-            }
-
-            return Some(());
-        }
-
-        None
+        Some(())
     }
 }
 
@@ -349,7 +361,7 @@ impl ModelInfo {
         let length = u32::from_be_bytes(header);
 
         let mut truncated = vec![0; std::cmp::min(length as usize, 21)];
-        owned_safe_tensors.bump_pos();
+        owned_safe_tensors.seek_next_whole_byte();
         owned_safe_tensors.read_exact(&mut truncated)?;
 
         Ok(Self {
@@ -464,7 +476,7 @@ impl Message {
         let length = u32::from_be_bytes(header);
 
         let mut content = vec![0; length as usize];
-        owned_safe_tensors.bump_pos();
+        owned_safe_tensors.seek_next_whole_byte();
         owned_safe_tensors.read_exact(&mut content)?;
 
         Ok(Self::new(&content))
@@ -496,7 +508,7 @@ impl Message {
         let header = u32::try_from(self.content.len())?.to_be_bytes();
 
         owned_safe_tensors.write_all(&header)?;
-        owned_safe_tensors.bump_pos();
+        owned_safe_tensors.seek_next_whole_byte();
         owned_safe_tensors.write_all(&self.content)?;
 
         Ok(())
@@ -687,12 +699,12 @@ mod tests {
 
     #[test]
     #[rustfmt::skip]
-    fn owned_safe_tensors_write_with_bump_pos_inserts_padding() {
+    fn owned_safe_tensors_write_with_seek_next_whole_byte_inserts_padding() {
         let mut input = make_owned_safe_tensors(5);
 
         assert!(input.write_all(&[255]).is_ok());
 
-        input.bump_pos();
+        input.seek_next_whole_byte();
 
         assert!(input.write_all(&[255]).is_ok());
 
@@ -735,7 +747,7 @@ mod tests {
 
             assert!(input.write_all(&[255]).is_ok());
 
-            input.bump_pos();
+            input.seek_next_whole_byte();
 
             assert!(input.write_all(&[255]).is_ok());
 
@@ -743,7 +755,7 @@ mod tests {
 
             assert!(input.read_exact(&mut buffer_1).is_ok());
 
-            input.bump_pos();
+            input.seek_next_whole_byte();
 
             assert!(input.read_exact(&mut buffer_2).is_ok());
 
