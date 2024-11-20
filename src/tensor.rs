@@ -214,6 +214,72 @@ impl OwnedSafeTensors {
 
         None
     }
+
+    pub fn write_bit(&mut self, bit: bool) -> Option<()> {
+        while let Some(&(tensor_pos, element_pos, bit_pos)) =
+            self.next_pos.as_ref()
+        {
+            let Some((_, owned_tensor, dtype_size)) =
+                self.tensors.get_mut(tensor_pos)
+            else {
+                // Next position points to invalid owned tensor.
+                //
+                self.next_pos = None;
+                break
+            };
+
+            let Some(dtype_size) = dtype_size else {
+                // Next position points to unsuitable owned tensor.
+                // We advance to the next owned tensor.
+                //
+                self.next_pos = Some((
+                    tensor_pos + 1,
+                    0,
+                    8 - self.bits_per_byte,
+                ));
+                continue
+            };
+
+            let byte_pos = (element_pos + 1) * *dtype_size - 1;
+
+            let Some(byte) = owned_tensor.data.get_mut(byte_pos)
+            else {
+                // Next position points to invalid byte.  We advance
+                // to the next owned tensor.
+                //
+                self.next_pos = Some((
+                    tensor_pos + 1,
+                    0,
+                    8 - self.bits_per_byte,
+                ));
+                continue
+            };
+
+            let modified_byte = byte.embed_bit(bit, bit_pos)?;
+
+            *byte = modified_byte;
+
+            if bit_pos < 7 {
+                // We advance to the next bit.
+                //
+                self.next_pos =
+                    Some((tensor_pos, element_pos, bit_pos + 1));
+            } else {
+                // Current byte is now exhausted.  We advance to the
+                // next byte.
+                //
+                self.next_pos = Some((
+                    tensor_pos,
+                    element_pos + 1,
+                    8 - self.bits_per_byte,
+                ));
+            }
+
+            return Some(());
+        }
+
+        None
+    }
 }
 
 impl io::Read for OwnedSafeTensors {
@@ -256,81 +322,9 @@ impl io::Write for OwnedSafeTensors {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         let mut error = None;
 
-        'outer: for bit in BitIter::new(buffer) {
-            loop {
-                let Some(&(tensor_pos, element_pos, bit_pos)) =
-                    self.next_pos.as_ref()
-                else {
-                    // No next position.
-                    //
-                    error = Some(io::ErrorKind::StorageFull);
-                    break 'outer;
-                };
-
-                let Some((_, owned_tensor, dtype_size)) =
-                    self.tensors.get_mut(tensor_pos)
-                else {
-                    // Next position points to invalid owned tensor.
-                    //
-                    self.next_pos = None;
-                    error = Some(io::ErrorKind::StorageFull);
-                    break 'outer;
-                };
-
-                let Some(dtype_size) = dtype_size else {
-                    // Next position points to unsuitable owned tensor.
-                    // We advance to the next owned tensor.
-                    //
-                    self.next_pos = Some((
-                        tensor_pos + 1,
-                        0,
-                        8 - self.bits_per_byte,
-                    ));
-                    continue;
-                };
-
-                let byte_pos = (element_pos + 1) * *dtype_size - 1;
-
-                let Some(byte) = owned_tensor.data.get_mut(byte_pos)
-                else {
-                    // Next position points to invalid byte.  We advance
-                    // to the next owned tensor.
-                    //
-                    self.next_pos = Some((
-                        tensor_pos + 1,
-                        0,
-                        8 - self.bits_per_byte,
-                    ));
-                    continue;
-                };
-
-                let Some(modified_byte) = byte.embed_bit(bit, bit_pos)
-                else {
-                    // Couldn't embed the bit.
-                    //
-                    self.next_pos = None;
-                    error = Some(io::ErrorKind::StorageFull);
-                    break 'outer;
-                };
-
-                *byte = modified_byte;
-
-                if bit_pos < 7 {
-                    // We advance to the next bit.
-                    //
-                    self.next_pos =
-                        Some((tensor_pos, element_pos, bit_pos + 1));
-                } else {
-                    // Current byte is now exhausted.  We advance to the
-                    // next byte.
-                    //
-                    self.next_pos = Some((
-                        tensor_pos,
-                        element_pos + 1,
-                        8 - self.bits_per_byte,
-                    ));
-                }
-
+        for bit in BitIter::new(buffer) {
+            if self.write_bit(bit).is_none() {
+                error = Some(io::ErrorKind::StorageFull);
                 break;
             }
         }
