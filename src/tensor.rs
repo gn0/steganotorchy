@@ -368,8 +368,8 @@ impl ModelInfo {
             bits_per_byte: owned_safe_tensors.bits_per_byte,
             length,
             truncated,
-            n_zero_bits: Self::count_zero_bits(&owned_safe_tensors),
-            n_bytes: Self::count_bytes(&owned_safe_tensors),
+            n_zero_bits: Self::count_zero_bits(owned_safe_tensors),
+            n_bytes: Self::count_bytes(owned_safe_tensors),
         })
     }
 
