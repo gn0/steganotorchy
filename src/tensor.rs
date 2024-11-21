@@ -4,7 +4,6 @@ use anyhow::anyhow;
 use safetensors::tensor::Dtype;
 use safetensors::{SafeTensors, View};
 use std::borrow::Cow;
-use std::fmt;
 use std::io;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -346,12 +345,12 @@ impl io::Write for OwnedSafeTensors {
 }
 
 pub struct ModelInfo {
-    capacity: usize,
-    bits_per_byte: usize,
-    length: usize,
-    truncated: Vec<u8>,
-    n_zero_bits: [usize; 8],
-    n_bytes: usize,
+    pub capacity: usize,
+    pub bits_per_byte: usize,
+    pub length: usize,
+    pub truncated: Vec<u8>,
+    pub n_zero_bits: [usize; 8],
+    pub n_bytes: usize,
 }
 
 impl ModelInfo {
@@ -420,64 +419,30 @@ impl ModelInfo {
 
         n_bytes
     }
-}
 
-impl fmt::Display for ModelInfo {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(formatter, "  Bytes:         {}", self.n_bytes)?;
+    pub fn repr_truncated(&self) -> String {
+        let mut result = String::new();
 
-        for bit_pos in (0..8).rev() {
-            writeln!(
-                formatter,
-                "  Zero {}{} bits: {}",
-                bit_pos + 1,
-                match bit_pos + 1 {
-                    1 => "st",
-                    2 => "nd",
-                    3 => "rd",
-                    _ => "th",
-                },
-                self.n_zero_bits[bit_pos]
-            )?;
-        }
-
-        writeln!(formatter, "")?;
-        writeln!(
-            formatter,
-            "  Assuming {} bits/byte:",
-            self.bits_per_byte
-        )?;
-        writeln!(formatter, "")?;
-        writeln!(
-            formatter,
-            "    Capacity:        {} bits",
-            self.capacity * self.bits_per_byte
-        )?;
-        writeln!(
-            formatter,
-            "    Message length:  {} bytes",
-            self.length
-        )?;
-        write!(formatter, "    Message content: \"")?;
+        result.push('"');
 
         for (index, &byte) in self.truncated.iter().enumerate() {
             if index == 20 {
-                write!(formatter, "...")?;
+                result.push_str("...");
                 break;
             } else if byte as char == '"' {
-                write!(formatter, r#"\""#)?;
+                result.push_str(r#"\""#);
             } else {
                 let repr = &format!("{:?}", byte as char);
                 let repr = repr.strip_prefix("'").unwrap_or(repr);
                 let repr = repr.strip_suffix("'").unwrap_or(repr);
 
-                write!(formatter, "{}", repr)?;
+                result.push_str(repr);
             }
         }
 
-        writeln!(formatter, r#"""#)?;
+        result.push('"');
 
-        Ok(())
+        result
     }
 }
 

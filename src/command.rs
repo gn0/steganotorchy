@@ -68,7 +68,32 @@ pub fn inspect(
 
     println!("Model file {:?}:", model_filename);
     println!();
-    println!("{}", model_info);
+    println!("  Bytes:         {}", model_info.n_bytes);
+
+    for bit_pos in (0..8).rev() {
+        println!(
+            "  Zero {}{} bits: {}",
+            bit_pos + 1,
+            match bit_pos + 1 {
+                1 => "st",
+                2 => "nd",
+                3 => "rd",
+                _ => "th",
+            },
+            model_info.n_zero_bits[bit_pos]
+        );
+    }
+
+    println!();
+    println!("  Assuming {} bits/byte:", model_info.bits_per_byte);
+    println!();
+    println!(
+        "    Capacity:        {} bits",
+        model_info.capacity * model_info.bits_per_byte
+    );
+    println!("    Message length:  {} bytes", model_info.length);
+    println!("    Message content: {}", model_info.repr_truncated());
+    println!();
 
     Ok(())
 }
