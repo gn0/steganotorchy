@@ -350,6 +350,7 @@ pub struct ModelInfo {
     bits_per_byte: usize,
     length: usize,
     truncated: Vec<u8>,
+    n_zero_bits: usize,
 }
 
 impl ModelInfo {
@@ -362,11 +363,19 @@ impl ModelInfo {
         owned_safe_tensors.seek_next_whole_byte();
         owned_safe_tensors.read_exact(&mut truncated)?;
 
+        let mut n_zero_bits = 0;
+        owned_safe_tensors.reset_pos();
+
+        while let Some(bit) = owned_safe_tensors.read_bit() {
+            n_zero_bits += (!bit) as usize;
+        }
+
         Ok(Self {
             capacity: owned_safe_tensors.capacity,
             bits_per_byte: owned_safe_tensors.bits_per_byte,
             length,
             truncated,
+            n_zero_bits,
         })
     }
 }
@@ -377,6 +386,11 @@ impl fmt::Display for ModelInfo {
             formatter,
             "  Capacity:         {} bits",
             self.capacity * self.bits_per_byte
+        )?;
+        writeln!(
+            formatter,
+            "  Number of 0 bits: {}",
+            self.n_zero_bits
         )?;
         writeln!(
             formatter,
