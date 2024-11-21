@@ -66,10 +66,7 @@ pub fn inspect(
         &mut owned_safe_tensors,
     )?;
 
-    println!(
-        "Model file {:?} ({} bits/byte):",
-        model_filename, bits_per_byte
-    );
+    println!("Model file {:?}:", model_filename);
     println!();
     println!("{}", model_info);
 

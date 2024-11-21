@@ -350,7 +350,8 @@ pub struct ModelInfo {
     bits_per_byte: usize,
     length: usize,
     truncated: Vec<u8>,
-    n_zero_bits: usize,
+    n_zero_bits: [usize; 8],
+    n_bytes: usize,
 }
 
 impl ModelInfo {
@@ -363,41 +364,101 @@ impl ModelInfo {
         owned_safe_tensors.seek_next_whole_byte();
         owned_safe_tensors.read_exact(&mut truncated)?;
 
-        let mut n_zero_bits = 0;
-        owned_safe_tensors.reset_pos();
-
-        while let Some(bit) = owned_safe_tensors.read_bit() {
-            n_zero_bits += (!bit) as usize;
-        }
-
         Ok(Self {
             capacity: owned_safe_tensors.capacity,
             bits_per_byte: owned_safe_tensors.bits_per_byte,
             length,
             truncated,
-            n_zero_bits,
+            n_zero_bits: Self::count_zero_bits(&owned_safe_tensors),
+            n_bytes: Self::count_bytes(&owned_safe_tensors),
         })
+    }
+
+    fn count_zero_bits(
+        owned_safe_tensors: &OwnedSafeTensors,
+    ) -> [usize; 8] {
+        let mut n_zero_bits = [0; 8];
+
+        for (_, owned_tensor, dtype_size) in
+            owned_safe_tensors.tensors()
+        {
+            let Some(dtype_size) = dtype_size else {
+                continue;
+            };
+
+            for element_pos in 0..(owned_tensor.data_len() / dtype_size)
+            {
+                let byte_pos = (element_pos + 1) * dtype_size - 1;
+                let byte = owned_tensor
+                    .data
+                    .get(byte_pos)
+                    .expect("Byte position should be valid.");
+
+                for bit_pos in 0..8 {
+                    let bit = (byte & (1 << (7 - bit_pos))) > 0;
+
+                    n_zero_bits[bit_pos] += (!bit) as usize;
+                }
+            }
+        }
+
+        n_zero_bits
+    }
+
+    fn count_bytes(owned_safe_tensors: &OwnedSafeTensors) -> usize {
+        let mut n_bytes = 0;
+
+        for (_, owned_tensor, dtype_size) in
+            owned_safe_tensors.tensors()
+        {
+            let Some(dtype_size) = dtype_size else {
+                continue;
+            };
+
+            n_bytes += owned_tensor.data_len() / dtype_size;
+        }
+
+        n_bytes
     }
 }
 
 impl fmt::Display for ModelInfo {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(formatter, "  Bytes:         {}", self.n_bytes)?;
+
+        for bit_pos in (0..8).rev() {
+            writeln!(
+                formatter,
+                "  Zero {}{} bits: {}",
+                bit_pos + 1,
+                match bit_pos + 1 {
+                    1 => "st",
+                    2 => "nd",
+                    3 => "rd",
+                    _ => "th",
+                },
+                self.n_zero_bits[bit_pos]
+            )?;
+        }
+
+        writeln!(formatter, "")?;
         writeln!(
             formatter,
-            "  Capacity:         {} bits",
+            "  Assuming {} bits/byte:",
+            self.bits_per_byte
+        )?;
+        writeln!(formatter, "")?;
+        writeln!(
+            formatter,
+            "    Capacity:        {} bits",
             self.capacity * self.bits_per_byte
         )?;
         writeln!(
             formatter,
-            "  Number of 0 bits: {}",
-            self.n_zero_bits
-        )?;
-        writeln!(
-            formatter,
-            "  Message length:   {} bytes",
+            "    Message length:  {} bytes",
             self.length
         )?;
-        write!(formatter, "  Message content:  \"")?;
+        write!(formatter, "    Message content: \"")?;
 
         for (index, &byte) in self.truncated.iter().enumerate() {
             if index == 20 {
