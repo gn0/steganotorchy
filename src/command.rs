@@ -56,6 +56,7 @@ pub fn extract(
 pub fn inspect(
     model_filename: &OsStr,
     bits_per_byte: usize,
+    verbose: bool,
 ) -> anyhow::Result<()> {
     let mut owned_safe_tensors = tensor::OwnedSafeTensors::from_file(
         model_filename,
@@ -68,23 +69,27 @@ pub fn inspect(
 
     println!("Model file {:?}:", model_filename);
     println!();
-    println!("  Bytes:         {}", model_info.n_bytes);
 
-    for bit_pos in (0..8).rev() {
-        println!(
-            "  Zero {}{} bits: {}",
-            bit_pos + 1,
-            match bit_pos + 1 {
-                1 => "st",
-                2 => "nd",
-                3 => "rd",
-                _ => "th",
-            },
-            model_info.n_zero_bits[bit_pos]
-        );
+    if verbose {
+        println!("  Bytes:         {}", model_info.n_bytes);
+
+        for bit_pos in (0..8).rev() {
+            println!(
+                "  Zero {}{} bits: {}",
+                bit_pos + 1,
+                match bit_pos + 1 {
+                    1 => "st",
+                    2 => "nd",
+                    3 => "rd",
+                    _ => "th",
+                },
+                model_info.n_zero_bits[bit_pos]
+            );
+        }
+
+        println!();
     }
 
-    println!();
     println!("  Assuming {} bits/byte:", model_info.bits_per_byte);
     println!();
     println!(

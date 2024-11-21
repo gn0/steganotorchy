@@ -14,7 +14,10 @@ enum Command {
     Extract {
         output_filename: OsString,
     },
-    Inspect,
+    Inspect {
+        #[arg(long, short)]
+        verbose: bool,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -53,9 +56,10 @@ fn main() -> anyhow::Result<()> {
             output_filename,
             args.bits_per_byte as usize,
         ),
-        Command::Inspect => command::inspect(
+        Command::Inspect { verbose } => command::inspect(
             &args.model_filename,
             args.bits_per_byte as usize,
+            *verbose,
         ),
     }
 }
