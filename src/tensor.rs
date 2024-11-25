@@ -393,10 +393,11 @@ impl ModelInfo {
                     .get(byte_pos)
                     .expect("Byte position should be valid.");
 
-                for bit_pos in 0..8 {
-                    let bit = (byte & (1 << (7 - bit_pos))) > 0;
+                for (pos, counter) in n_zero_bits.iter_mut().enumerate()
+                {
+                    let bit = (byte & (1 << (7 - pos))) > 0;
 
-                    n_zero_bits[bit_pos] += (!bit) as usize;
+                    *counter += (!bit) as usize;
                 }
             }
         }
